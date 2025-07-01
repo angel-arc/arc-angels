@@ -1,21 +1,36 @@
 /**
- * ARS ANGEL - Initial Types
- * Commit 1: Just getting started
+ * ARS ANGEL - Types
+ * Commit 2: Expanded type definitions
  */
 
-// Basic config - will expand later
 export interface AgentConfig {
   name: string;
   version: string;
+  description?: string;
   debug?: boolean;
 }
 
-// Simple state
-export type AgentState = 'idle' | 'running' | 'error';
+export type AgentState = 'idle' | 'thinking' | 'executing' | 'error';
 
-// Task placeholder
 export interface Task {
   id: string;
   type: string;
-  data: any; // TODO: proper typing
+  payload: unknown;
+  status: TaskStatus;
+  createdAt: Date;
+}
+
+export type TaskStatus = 'pending' | 'running' | 'done' | 'failed';
+
+// Logging config for debug mode
+export interface LogConfig {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  prefix: string;
+  timestamps: boolean;
+}
+
+// Placeholder for MCP - will implement next
+export interface MCPEndpoint {
+  url: string;
+  // TODO: auth, protocols, etc
 }

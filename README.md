@@ -1,8 +1,8 @@
 # ARS ANGEL
 
-> Arc ecosystem AI agent (WIP)
+> Arc ecosystem AI agent
 
-**Started:** 01/02/2026
+**Last Updated:** 03/02/2026
 
 ## Status
 
@@ -10,26 +10,71 @@
 
 ## TODO
 
-- [ ] Define core types
-- [ ] Basic agent class
+- [x] Define core types
+- [x] Basic agent class
 - [ ] MCP integration
 - [ ] Service discovery
 - [ ] Approval workflow
 - [ ] Token integration
 
-## Getting Started
+## Installation
 
 ```bash
 # Coming soon
 npm install ars-angel
 ```
 
-## Notes
+## Quick Start
 
-Building an autonomous agent for the Arc ecosystem. Will integrate with:
-- Rig framework
-- Model Context Protocol (MCP)
-- Ryzome marketplace
+```typescript
+import { ArsAngel } from 'ars-angel';
+
+const agent = new ArsAngel({
+  name: 'my-agent',
+  version: '0.1.0',
+  debug: true,
+});
+
+await agent.start();
+```
+
+## Architecture
+
+```
+┌─────────────────┐
+│    ArsAngel     │
+│  ┌───────────┐  │
+│  │   Tasks   │  │
+│  └───────────┘  │
+│  ┌───────────┐  │
+│  │   State   │  │
+│  └───────────┘  │
+└─────────────────┘
+        │
+        ▼
+   (MCP - TODO)
+```
+
+## Development
+
+```bash
+# Run in dev mode
+npx ts-node index.ts
+```
+
+### Debug Mode
+
+Set `debug: true` in config to enable verbose logging.
+
+```typescript
+const agent = new ArsAngel({
+  name: 'test',
+  version: '0.1.0',
+  debug: true, // Enables debug output
+});
+
+agent.debug_dumpState(); // Print internal state
+```
 
 ---
-*01/02/2026*
+*03/02/2026*
