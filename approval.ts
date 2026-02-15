@@ -1,7 +1,8 @@
 /**
  * ARS ANGEL - Approval Manager
- * Commit 5: Human-in-the-loop approval workflow
- * 10/02/2026
+ * v1.0.0 Production Release
+ *
+ * Human-in-the-loop approval workflow
  */
 
 import {
@@ -28,22 +29,20 @@ export class ApprovalManager {
     this.eventHandler = handler;
   }
 
-  async requestApproval(task: Task, services: string[]): Promise<boolean> {
+  async requestApproval(
+    task: Task,
+    estimatedCost: number,
+    services: string[]
+  ): Promise<boolean> {
     if (this.mode === 'auto') return true;
 
     if (this.mode === 'threshold' && this.threshold) {
-      const trusted = services.every((s) => this.threshold!.trustedServices.includes(s));
-      if (trusted) return true;
+      if (this.meetsThreshold(estimatedCost, services)) {
+        return true;
+      }
     }
 
-    // Need manual approval
-    const request: ApprovalRequest = {
-      taskId: task.id,
-      action: task.payload.action,
-      services,
-      expiresAt: Date.now() + 300000,
-    };
-
+    const request = this.createRequest(task, estimatedCost, services);
     this.pending.set(task.id, request);
     this.emit({ type: 'approval_required', request });
 
@@ -56,6 +55,27 @@ export class ApprovalManager {
 
   reject(taskId: string): void {
     this.pending.delete(taskId);
+  }
+
+  getPendingApprovals(): ApprovalRequest[] {
+    return Array.from(this.pending.values());
+  }
+
+  private meetsThreshold(cost: number, services: string[]): boolean {
+    if (!this.threshold) return false;
+    const withinCost = cost <= this.threshold.maxTokenValue;
+    const trusted = services.every((s) => this.threshold!.trustedServices.includes(s));
+    return withinCost && trusted;
+  }
+
+  private createRequest(task: Task, cost: number, services: string[]): ApprovalRequest {
+    return {
+      taskId: task.id,
+      action: task.payload.action,
+      estimatedCost: cost,
+      services,
+      expiresAt: Date.now() + 300000,
+    };
   }
 
   private async waitForApproval(taskId: string): Promise<boolean> {

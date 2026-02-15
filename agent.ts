@@ -1,7 +1,9 @@
 /**
- * ARS ANGEL - Agent Class
- * Commit 5: Full implementation with approval
- * 10/02/2026
+ * ARS ANGEL - Core Agent
+ * v1.0.0 Production Release
+ * 15/02/2026 - Token Launch
+ *
+ * Autonomous AI agent for the Arc ecosystem with $ANGEL token integration
  */
 
 import {
@@ -9,61 +11,65 @@ import {
   AgentState,
   Task,
   TaskPayload,
+  TaskType,
+  TaskStatus,
   TaskResult,
+  AgentIdentity,
   ServiceDefinition,
   AgentEvent,
   AgentEventHandler,
-  DebugStats,
+  ANGEL_TOKEN,
 } from './types';
 import { MCPClient } from './mcp-client';
 import { ServiceRegistry } from './service-registry';
 import { ApprovalManager } from './approval';
+import { SettlementManager } from './settlement';
 
 export class ArsAngel {
   private config: AgentConfig;
   private state: AgentState = 'initializing';
+  private identity: AgentIdentity | null = null;
   private tasks: Map<string, Task> = new Map();
   private handlers: AgentEventHandler[] = [];
 
   private mcpClient: MCPClient;
   private serviceRegistry: ServiceRegistry;
   private approvalManager: ApprovalManager;
-
-  // TODO: remove debug stats
-  private stats: DebugStats = { tasksRun: 0, errors: 0 };
+  private settlementManager: SettlementManager;
 
   constructor(config: AgentConfig) {
     this.config = config;
-    this.mcpClient = new MCPClient(config.mcpEndpoint);
+    this.mcpClient = new MCPClient({ endpoint: config.mcpEndpoint });
     this.serviceRegistry = new ServiceRegistry(this.mcpClient);
     this.approvalManager = new ApprovalManager(config.approvalMode, config.approvalThreshold);
+    this.settlementManager = new SettlementManager(config.wallet, config.tokenContract);
 
     this.approvalManager.setEventHandler((e) => this.emit(e));
   }
 
   async initialize(): Promise<void> {
+    // Verify token contract
+    const validContract = await this.settlementManager.verifyContract();
+    if (!validContract) {
+      throw new Error(`Invalid token contract. Expected: ${ANGEL_TOKEN.contract}`);
+    }
+
     await this.mcpClient.connect();
     await this.serviceRegistry.initialize();
+    this.identity = this.createIdentity();
     this.state = 'idle';
-    this.emit({ type: 'initialized' });
+    this.emit({ type: 'initialized', identity: this.identity });
   }
 
   async shutdown(): Promise<void> {
     await this.mcpClient.disconnect();
     this.tasks.clear();
+    this.state = 'initializing';
     this.emit({ type: 'shutdown' });
   }
 
-  async submitTask(type: 'query' | 'execute' | 'compose', payload: TaskPayload): Promise<string> {
-    const task: Task = {
-      id: `task_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-      type,
-      payload,
-      status: 'pending',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
+  async submitTask(type: TaskType, payload: TaskPayload): Promise<string> {
+    const task = this.createTask(type, payload);
     this.tasks.set(task.id, task);
     this.emit({ type: 'task_submitted', taskId: task.id });
     this.processTask(task.id);
@@ -84,11 +90,15 @@ export class ArsAngel {
 
   rejectTask(taskId: string): void {
     this.approvalManager.reject(taskId);
-    this.updateTask(taskId, 'failed', 'Rejected');
+    this.updateTask(taskId, 'failed', 'Rejected by user');
   }
 
   async discoverServices(capabilities: string[]): Promise<ServiceDefinition[]> {
     return this.serviceRegistry.discover(capabilities);
+  }
+
+  async getTokenBalance(): Promise<number> {
+    return this.settlementManager.getBalance();
   }
 
   getState(): AgentState {
@@ -97,6 +107,10 @@ export class ArsAngel {
 
   getTask(id: string): Task | undefined {
     return this.tasks.get(id);
+  }
+
+  getIdentity(): AgentIdentity | null {
+    return this.identity;
   }
 
   private async processTask(taskId: string): Promise<void> {
@@ -109,7 +123,17 @@ export class ArsAngel {
       this.state = 'planning';
 
       const services = await this.serviceRegistry.discover(task.payload.services || []);
-      if (services.length === 0) throw new Error('No services');
+      if (services.length === 0) {
+        throw new Error('No services available for requested capabilities');
+      }
+
+      const estimatedCost = services.reduce((sum, s) => sum + s.pricing.perCall, 0);
+
+      // Check balance
+      const balance = await this.settlementManager.getBalance();
+      if (balance < estimatedCost) {
+        throw new Error(`Insufficient $ANGEL balance. Need: ${estimatedCost}, Have: ${balance}`);
+      }
 
       // Approval (for execute tasks)
       if (task.type === 'execute') {
@@ -118,43 +142,71 @@ export class ArsAngel {
 
         const approved = await this.approvalManager.requestApproval(
           task,
+          estimatedCost,
           services.map((s) => s.id)
         );
-        if (!approved) throw new Error('Approval denied');
+
+        if (!approved) {
+          throw new Error('Approval timeout or rejected');
+        }
       }
 
       // Execution
       this.updateTask(taskId, 'running');
       this.state = 'executing';
 
-      const result = await this.serviceRegistry.invoke(
+      const { result, cost } = await this.serviceRegistry.invoke(
         services[0].id,
         task.payload.action,
         task.payload.data
       );
 
+      // Settlement
+      this.updateTask(taskId, 'settling');
+      this.state = 'settling';
+
+      const settlement = await this.settlementManager.settle(cost);
+      this.emit({ type: 'settlement_complete', settlement });
+
       const taskResult: TaskResult = {
         success: true,
         data: result,
+        servicesUsed: [services[0].id],
+        settlement,
       };
 
-      task.status = 'completed';
-      task.result = taskResult;
-      task.updatedAt = Date.now();
-      this.stats.tasksRun++;
-      this.emit({ type: 'task_completed', taskId, result: taskResult });
+      this.completeTask(taskId, taskResult);
 
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Unknown';
-      this.updateTask(taskId, 'failed', msg);
-      this.stats.errors++;
-      this.emit({ type: 'task_failed', taskId, error: msg });
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.failTask(taskId, message);
     } finally {
       this.state = 'idle';
     }
   }
 
-  private updateTask(id: string, status: Task['status'], error?: string): void {
+  private createTask(type: TaskType, payload: TaskPayload): Task {
+    return {
+      id: `task_${crypto.randomUUID().slice(0, 12)}`,
+      type,
+      payload,
+      status: 'pending',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  private createIdentity(): AgentIdentity {
+    return {
+      agentId: `ars-angel-${crypto.randomUUID().slice(0, 8)}`,
+      publicKey: `arc_pub_${crypto.randomUUID().replace(/-/g, '')}`,
+      wallet: this.config.wallet,
+      tokenContract: this.config.tokenContract,
+      registeredAt: Date.now(),
+    };
+  }
+
+  private updateTask(id: string, status: TaskStatus, error?: string): void {
     const task = this.tasks.get(id);
     if (task) {
       task.status = status;
@@ -163,13 +215,24 @@ export class ArsAngel {
     }
   }
 
-  private emit(event: AgentEvent): void {
-    this.handlers.forEach((h) => h(event));
+  private completeTask(id: string, result: TaskResult): void {
+    const task = this.tasks.get(id);
+    if (task) {
+      task.status = 'completed';
+      task.result = result;
+      task.updatedAt = Date.now();
+      this.emit({ type: 'task_completed', taskId: id, result });
+    }
   }
 
-  // Debug - TODO: remove
-  debug_dumpState(): void {
-    if (!this.config.debug) return;
-    console.log('State:', this.state, 'Tasks:', this.tasks.size, 'Stats:', this.stats);
+  private failTask(id: string, error: string): void {
+    this.updateTask(id, 'failed', error);
+    this.emit({ type: 'task_failed', taskId: id, error });
+  }
+
+  private emit(event: AgentEvent): void {
+    for (const handler of this.handlers) {
+      handler(event);
+    }
   }
 }

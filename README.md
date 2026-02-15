@@ -1,22 +1,46 @@
 # ARS ANGEL
 
-> Arc ecosystem AI agent
+> Autonomous AI agent for the Arc ecosystem
 
-## Status
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)]()
+[![Arc](https://img.shields.io/badge/Arc-ecosystem-purple)]()
+[![Token](https://img.shields.io/badge/$ANGEL-LIVE-green)]()
 
-🟡 **Beta** - Feature complete, testing in progress
+**Release Date:** 15/02/2026
 
-**Last Updated:** 10/02/2026
+---
 
-## Progress
+## Token Launch
 
-- [x] Core types
-- [x] Agent lifecycle
-- [x] MCP integration
-- [x] Service discovery
-- [x] Human-in-the-loop approval
-- [ ] Token integration (coming soon)
-- [ ] Production hardening
+**$ANGEL is now live!**
+
+| Property | Value |
+|----------|-------|
+| Token | $ANGEL |
+| Contract | `3p1uWgYa2DKAqZ7efuM3nJmAL7nofzfRGGhggX7Apump` |
+| Network | Solana |
+| Launch Date | 15/02/2026 |
+
+### Token Economics
+
+All service invocations settle in $ANGEL tokens:
+
+| Recipient | Share |
+|-----------|-------|
+| Service Provider | 85% |
+| Arc Treasury | 10% |
+| Operational | 5% |
+
+---
+
+## Overview
+
+ARS ANGEL is an autonomous agent that operates within the Arc ecosystem. It leverages:
+
+- **Rig Framework** - High-performance Rust-based AI agent foundation
+- **Model Context Protocol (MCP)** - Standardized agent-to-service communication
+- **Ryzome Marketplace** - Service discovery and invocation
+- **$ANGEL Token** - Native token for service settlements
 
 ## Installation
 
@@ -27,106 +51,140 @@ npm install ars-angel
 ## Quick Start
 
 ```typescript
-import { ArsAngel } from 'ars-angel';
+import { ArsAngel, createDefaultConfig } from 'ars-angel';
 
-const agent = new ArsAngel({
-  name: 'my-agent',
-  version: '0.1.0',
-  mcpEndpoint: 'wss://mcp.arc.fun/v1',
-  approvalMode: 'threshold',
-});
+const agent = new ArsAngel(createDefaultConfig({
+  wallet: '0x...your-wallet',
+  tokenContract: 'xxxxxxxxxxxxxxxx',
+}));
 
 await agent.initialize();
 
-// Listen for events
 agent.onEvent((event) => {
-  if (event.type === 'approval_required') {
-    console.log('Approval needed:', event.request);
-    // agent.approveTask(event.request.taskId);
+  if (event.type === 'settlement_complete') {
+    console.log('Paid:', event.settlement.total, '$ANGEL');
   }
 });
 
-// Submit a task
 await agent.submitTask('execute', {
-  action: 'memory.recall',
-  data: { query: 'user context' },
-  services: ['memory'],
+  action: 'defi.swap',
+  data: { from: 'SOL', to: 'ANGEL', amount: 10 },
+  services: ['swap'],
 });
+```
+
+## Configuration
+
+```typescript
+interface AgentConfig {
+  name: string;
+  version: string;
+  mcpEndpoint: string;
+  wallet: string;
+  tokenContract: string;
+  approvalMode: ApprovalMode;
+  approvalThreshold?: {
+    maxTokenValue: number;
+    trustedServices: string[];
+  };
+}
 ```
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────┐
-│               ArsAngel                   │
-│  ┌──────────────┐    ┌───────────────┐   │
-│  │    Tasks     │    │   Approval    │   │
-│  └──────┬───────┘    │   Manager     │   │
-│         │            └───────┬───────┘   │
-│  ┌──────▼───────────────────▼────────┐   │
-│  │         Service Registry          │   │
-│  │        (Ryzome Marketplace)       │   │
-│  └──────────────┬────────────────────┘   │
-│                 │                        │
-│  ┌──────────────▼────────────────────┐   │
-│  │           MCP Client              │   │
-│  └───────────────────────────────────┘   │
+│               ARS ANGEL                  │
+│                                          │
+│  ┌─────────┐  ┌──────────┐  ┌─────────┐  │
+│  │  Tasks  │  │ Approval │  │ Events  │  │
+│  └────┬────┘  └────┬─────┘  └────┬────┘  │
+│       └────────────┼─────────────┘       │
+│                    │                     │
+│       ┌────────────▼────────────┐        │
+│       │    Service Registry     │        │
+│       │   (Ryzome Discovery)    │        │
+│       └────────────┬────────────┘        │
+│                    │                     │
+│       ┌────────────▼────────────┐        │
+│       │       MCP Client        │        │
+│       │   (Protocol Layer)      │        │
+│       └────────────┬────────────┘        │
+│                    │                     │
+│       ┌────────────▼────────────┐        │
+│       │   Settlement Manager    │        │
+│       │      ($ANGEL Token)     │        │
+│       └─────────────────────────┘        │
 └──────────────────────────────────────────┘
+                     │
+                     ▼
+            Arc MCP Services
 ```
 
-## MCP Protocol
+## API Reference
+
+### Agent Lifecycle
 
 ```typescript
-const mcp = new MCPClient('wss://mcp.arc.fun/v1');
-await mcp.connect();
-const result = await mcp.invoke('service.action', { param: 'value' });
+await agent.initialize();  // Connect, load services, verify token
+await agent.shutdown();    // Disconnect, cleanup
 ```
 
-## Service Discovery
+### Task Submission
 
 ```typescript
-const services = await agent.discoverServices(['memory', 'context']);
-const result = await agent.invokeService('soul-graph', 'recall', {
-  query: 'recent context',
-});
+const taskId = await agent.submitTask(type, payload);
+
+// Types: 'query' | 'execute' | 'compose'
+// Payload: { action, data, services?, maxCost? }
 ```
 
-## Approval Workflow
-
-For sensitive operations, the agent supports human-in-the-loop approval.
-
-### Approval Modes
-
-| Mode | Description |
-|------|-------------|
-| `auto` | Approve all tasks automatically |
-| `manual` | Require approval for all `execute` tasks |
-| `threshold` | Auto-approve if within trust threshold |
+### Event Handling
 
 ```typescript
-const agent = new ArsAngel({
-  // ...
-  approvalMode: 'threshold',
-  approvalThreshold: {
-    trustedServices: ['soul-graph'],
-  },
-});
-
-// Handle approval requests
-agent.onEvent((e) => {
-  if (e.type === 'approval_required') {
-    // Show to user, then:
-    agent.approveTask(e.request.taskId);
-    // or: agent.rejectTask(e.request.taskId);
+const unsubscribe = agent.onEvent((event) => {
+  switch (event.type) {
+    case 'initialized':
+    case 'task_submitted':
+    case 'task_completed':
+    case 'task_failed':
+    case 'approval_required':
+    case 'settlement_complete':
+    case 'shutdown':
   }
 });
 ```
 
-## Roadmap
+### Approval Management
 
-- [ ] Token integration for service payments
-- [ ] On-chain settlement
-- [ ] Multi-agent coordination
+```typescript
+agent.approveTask(taskId);
+agent.rejectTask(taskId);
+```
+
+### Service Discovery
+
+```typescript
+const services = await agent.discoverServices(['memory', 'swap']);
+```
+
+### Token Balance
+
+```typescript
+const balance = await agent.getTokenBalance();
+console.log(`${balance} $ANGEL available`);
+```
+
+## Links
+
+- Token Contract: `xxxxxxxxxxxxxxxx`
+- Website: [arc.fun](https://arc.fun)
+- Documentation: [docs.arc.fun](https://docs.arc.fun)
+
+## License
+
+MIT
 
 ---
-*10/02/2026*
+
+*Released 15/02/2026*
